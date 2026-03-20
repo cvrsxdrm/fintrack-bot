@@ -1,98 +1,112 @@
 import requests
-
-import sqlite3
-
 import os
-
+import sqlite3
 import telebot
-
 from telebot import types
-
 from config import TOKEN
-
 from datetime import datetime
 
 bot = telebot.TeleBot(TOKEN)
 
-CURRENCIES = {"🪙 BTC": "bitcoin", "🔹 ETH": "ethereum", "💲 USDT": "tether"}
+CURRENCIES = {"🪙 BTC": "bitcoin", "🔹 ETH": "ethereum"}
+MONEY = {"USD": "tether", "EUR": "eur", "RUB": "rub", "JPY": "jpy"}
 
 CATEGORIES = ["Еда", "Транспорт", "Развлечения"]
 
+def main_menu_markup():
 
+    markup = types.InlineKeyboardMarkup(row_width=2)
+
+    markup.add(
+        types.InlineKeyboardButton("💰 Криптовалюты", callback_data="crypto_menu"),
+        types.InlineKeyboardButton("💸 Добавить расход", callback_data="add_spendings"),
+        types.InlineKeyboardButton("📋 Посмотреть расходы", callback_data="read_spendings"),
+        types.InlineKeyboardButton("🗑️ Очистить историю", callback_data="clear_history"),
+        types.InlineKeyboardButton("💳 Валюты", callback_data="check_money"))
+    
+    return markup
 
 def get_price(coin_id, vs_currency="usd"):
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies={vs_currency}"
-    
+
     try:
         response = requests.get(url, timeout=5)
         data = response.json()
 
         if coin_id in data and vs_currency in data[coin_id]:
             return data[coin_id][vs_currency]
+
         else:
             return None
 
     except requests.exceptions.RequestException:
         return None
+
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard = True)
-    button1 = types.KeyboardButton("💰 Криптовалюты")
-    button2 = types.KeyboardButton("💸 Добавить расход")
-    button3 = types.KeyboardButton("📋 Посмотреть расходы")
-    button4 = types.KeyboardButton("🗑️ Очистить историю")
-    markup.add(button1, button2, button3, button4)
+    bot.send_message(message.chat.id, "🌟 Привет!\n\n 💸 Я бот финансист, помогу тебе с финансами.", reply_markup = main_menu_markup())
 
-    bot.send_message(message.chat.id, "🌟 Привет!\n\n 💸 Я бот финансист, помогу тебе с финансами.", reply_markup = markup)
+# блок криптовалюты
+@bot.callback_query_handler(func=lambda call: call.data == "crypto_menu")
+def choose_currency(call):
+    bot.answer_callback_query(call.id)
 
-@bot.message_handler(func=lambda message: message.text == "💰 Криптовалюты")
-def choose_currency(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+
     for coin_name in CURRENCIES.keys():
-        item = types.KeyboardButton(coin_name)
+
+        item = types.InlineKeyboardButton(text=coin_name, callback_data=f"crypto_{coin_name}")
+
         markup.add(item)
 
-    button_back = types.KeyboardButton("⬅️ Назад")
+    button_back = types.InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+
     markup.add(button_back)
 
-    bot.send_message(message.chat.id, "📈 Выбери монету или вернись назад:", reply_markup=markup)
+    bot.edit_message_text("📈 Выбери монету или вернись назад:", message_id=call.message.message_id, chat_id=call.message.chat.id, reply_markup=markup)
 
-@bot.message_handler(func=lambda message: message.text in CURRENCIES)
-def ask_fiat_currency(message):
-    coin_id = CURRENCIES[message.text]
-    markup = types.InlineKeyboardMarkup()  
+@bot.callback_query_handler(func=lambda call: call.data.startswith("crypto_"))
+def ask_fiat_currency(call):
+    bot.answer_callback_query(call.id)
+    coin_name = call.data.split("_")[1]
+    coin_id = CURRENCIES[coin_name]
 
-    # Кнопки с валютами. В callback_data прячем ID монеты и саму валюту
+    markup = types.InlineKeyboardMarkup(row_width=2)
     btn_usd = types.InlineKeyboardButton("💵 USD", callback_data=f"fiat_{coin_id}_usd")
     btn_eur = types.InlineKeyboardButton("💶 EUR", callback_data=f"fiat_{coin_id}_eur")
     btn_rub = types.InlineKeyboardButton("💳 RUB", callback_data=f"fiat_{coin_id}_rub")
     btn_jpy = types.InlineKeyboardButton("💴 JPY", callback_data=f"fiat_{coin_id}_jpy")
 
     markup.add(btn_usd, btn_eur, btn_rub, btn_jpy)
-    bot.send_message(message.chat.id, f"В какой валюте показать курс {message.text}?", reply_markup=markup)
+
+    bot.edit_message_text(chat_id=call.message.chat.id,message_id=call.message.message_id,text=f"В какой валюте показать курс {coin_name}?", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fiat_"))
 def callback_price(call):
-    # Разрезаем: fiat_bitcoin_rub -> ['fiat', 'bitcoin', 'rub']
+    bot.answer_callback_query(call.id)
     _, coin_id, fiat = call.data.split("_")
     price = get_price(coin_id, fiat)
 
     if price:
         symbols = {"usd": "$", "eur": "€", "rub": "₽", "jpy": "¥"}
         sym = symbols.get(fiat, "")
-        markup = types.InlineKeyboardMarkup()
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+
         button = types.InlineKeyboardButton(text="🧮 Рассчитать стоимость", callback_data=f"calc_{price}_{sym}")
+
         markup.add(button)
+
         text = f"📈 Курс {coin_id.capitalize()}: {price} {sym}"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    
+
     elif price is None:
-        bot.send_message(call.message.chat.id, "⚠️ Не удалось получить курс. Попробуй позже.")
+        bot.send_message(call.message.chat.id, "⚠️ Ошибка API. Попробуй позже.")
         return
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("calc_"))
 def callback_calc(call):
-    # Теперь тут три части: ['calc', '65000.5', '$']
+    bot.answer_callback_query(call.id)
     _, price, sym = call.data.split("_")
     msg = bot.send_message(call.message.chat.id, f"🪙 Сколько монет у тебя есть? (Результат будет в {sym})\n\nВведи число:")
     bot.register_next_step_handler(msg, calculate, float(price), sym)
@@ -110,43 +124,52 @@ def calculate(message, price, sym):
         start_handler(message)
 
     except ValueError:
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add(types.KeyboardButton("❌ Отмена"))
-        bot.send_message(message.chat.id, "⚠️ Ошибка! Введи только число:", reply_markup=markup)
-        bot.register_next_step_handler(message, calculate, price, sym)
 
-@bot.message_handler(func=lambda message: message.text == "💸 Добавить расход")
-def choose_category(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+
+        markup.add(types.InlineKeyboardButton("❌ Отмена"))
+
+        bot.send_message(message.chat.id, "❌ Введи числовое значение!", reply_markup=markup)
+
+# блок расходы
+@bot.callback_query_handler(func=lambda call: call.data == "add_spendings")
+def choose_category(call):
+    bot.answer_callback_query(call.id)
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
 
     for category in CATEGORIES:
-        item = types.KeyboardButton(category)
+        item = types.InlineKeyboardButton(text=category, callback_data=f"cat_{category}")
         markup.add(item)
 
-    button_back = types.KeyboardButton("⬅️ Назад")
+    button_back = types.InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+
     markup.add(button_back)
 
-    bot.send_message(message.chat.id, "💰 Выбери категорию или вернись назад:", reply_markup=markup)
+    bot.edit_message_text("💰 Выбери категорию или вернись назад:", message_id=call.message.message_id, chat_id=call.message.chat.id, reply_markup=markup)
 
-@bot.message_handler(func=lambda message: message.text == "⬅️ Назад")
-def back_to_main(message):
-    start_handler(message)
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_main")
+def back_to_main(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="🌟 Привет!\n\n💸 Я бот финансист...", reply_markup=main_menu_markup())
 
-@bot.message_handler(func=lambda message: message.text in CATEGORIES)
-def ask_spending_currency(message):
-    category = message.text
-    markup = types.InlineKeyboardMarkup()
-    # Передаем категорию и валюту через callback
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
+def ask_spending_currency(call):
+    bot.answer_callback_query(call.id)
+    category = call.data.split("_")[1]  
+    markup = types.InlineKeyboardMarkup(row_width=2)
     btn_usd = types.InlineKeyboardButton("💵 USD", callback_data=f"spend_{category}_usd")
     btn_eur = types.InlineKeyboardButton("💶 EUR", callback_data=f"spend_{category}_eur")
     btn_rub = types.InlineKeyboardButton("💳 RUB", callback_data=f"spend_{category}_rub")
     btn_jpy = types.InlineKeyboardButton("💴 JPY", callback_data=f"spend_{category}_jpy")
+
     markup.add(btn_usd, btn_eur, btn_rub, btn_jpy)
 
-    bot.send_message(message.chat.id, f"В какой валюте была трата на {category}?", reply_markup=markup)
+    bot.edit_message_text(chat_id=call.message.chat.id,message_id=call.message.message_id, text=f"В какой валюте была трата на категорию {category}?", reply_markup=markup,)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("spend_"))
 def callback_spending_currency(call):
+    bot.answer_callback_query(call.id)
     _, category, fiat = call.data.split("_")
     msg = bot.send_message(call.message.chat.id, f"Сколько ты потратил в {fiat.upper()}?")
     # Передаем и категорию, и валюту в финальную функцию записи
@@ -164,45 +187,49 @@ def how_much_spend(message, category, fiat):
         now = datetime.now().strftime("%d.%m.%Y %H:%M")
 
         with open(filename, "a", encoding="utf-8") as f:
-            # ТЕПЕРЬ ЗАПИСЫВАЕМ С ВАЛЮТОЙ!
             f.write(f"[{now}] {category}: {amount} {fiat.upper()}\n")
         bot.send_message(message.chat.id, f"✅ Записал: {category} — {amount} {fiat.upper()}")
         start_handler(message)
 
     except ValueError:
-        bot.send_message(message.chat.id, "⚠️ Ошибка! Введи число:")
+        bot.send_message(message.chat.id, "❌ Введи числовое значение!")
         bot.register_next_step_handler(message, how_much_spend, category, fiat)
 
-@bot.message_handler(func=lambda message: message.text == "📋 Посмотреть расходы")
-def send_spendings(message):
-    filename = f"spendings_{message.chat.id}.txt"
+@bot.callback_query_handler(func=lambda call: call.data == "read_spendings")
+def send_spendings(call):
+    bot.answer_callback_query(call.id)
+    filename = f"spendings_{call.message.chat.id}.txt"
 
     if not os.path.exists(filename):
-        bot.send_message(message.chat.id, "❌ Список пока пуст!")
+        bot.send_message(call.message.chat.id, "❌ Список пока пуст!")
         return
 
     with open(filename, "r", encoding="utf-8") as f:
         spendings = f.readlines()
 
     if not spendings:
-        bot.send_message(message.chat.id, "❌ Список пока пуст!")
+        bot.send_message(call.message.chat.id, "❌ Список пока пуст!")
         return
 
-    text_report = "📋 **Твои траты:**\n\n" + "".join(spendings)
-    bot.send_message(message.chat.id, text_report, parse_mode="Markdown")
+    text_report = "📋 Твои траты:\n\n" + "".join(spendings)
+    bot.send_message(call.message.chat.id, text_report)
 
-@bot.message_handler(func=lambda message: message.text == "🗑️ Очистить историю")
-def confirm_clear(message):
-    markup = types.InlineKeyboardMarkup()
+# блок для удаления файла
+@bot.callback_query_handler(func=lambda call: call.data == "clear_history")
+def confirm_clear(call):
+    bot.answer_callback_query(call.id)
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
     btn_yes = types.InlineKeyboardButton("✅ Да, очистить", callback_data="clear_yes")
     btn_no = types.InlineKeyboardButton("❌ Нет, оставить", callback_data="clear_no")
     markup.add(btn_yes, btn_no)
 
-    bot.send_message(message.chat.id, "❗ Ты уверен, что хочешь удалить все записи?", reply_markup=markup)
 
-# Обработчик кнопок удаления
+    bot.send_message(call.message.chat.id, "❗ Ты уверен, что хочешь удалить все записи?", reply_markup=markup)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clear_"))
 def callback_clear(call):
+    bot.answer_callback_query(call.id)
 
     if call.data == "clear_yes":
         filename = f"spendings_{call.message.chat.id}.txt"
@@ -216,6 +243,42 @@ def callback_clear(call):
 
     else:
         bot.edit_message_text("🏠 Удаление отменено.", call.message.chat.id, call.message.message_id)
+
+# 1. Выбор валюты
+@bot.callback_query_handler(func=lambda call: call.data == "check_money")
+def choose_money(call):
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    for name, code in MONEY.items():
+        btn = types.InlineKeyboardButton(name, callback_data=f"fiatconv_{code}")
+        markup.add(btn)
+
+    bot.edit_message_text("📈 Выбери валюту, которую хочешь купить за USD:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+# 2. Ловим выбор и спрашиваем сумму
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fiatconv_"))
+def ask_amount_fiat(call):
+    bot.answer_callback_query(call.id)
+    target_fiat = call.data.split("_")[1]
+    msg = bot.send_message(call.message.chat.id, f"Введите сумму в USD для перевода в {target_fiat.upper()}:")
+    # Передаем выбранную валюту дальше в функцию расчета
+    bot.register_next_step_handler(msg, calculate_fiat, target_fiat)
+
+# 3. Сама функция расчета
+def calculate_fiat(message, target_fiat):
+    try:
+        usd_amount = float(message.text.replace(',', '.'))
+        # Используем твою функцию get_price.
+        # Т.к. CoinGecko — крипто-сервис, берем tether как эквивалент USD
+        rate = get_price("tether", target_fiat)
+
+        if rate:
+            result = round(usd_amount * rate, 2)
+            bot.send_message(message.chat.id, f"✅ {usd_amount} USD = {result} {target_fiat.upper()}\n(Курс: {rate})")
+        else:
+            bot.send_message(message.chat.id, "⚠️ Ошибка API. Попробуй позже.")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Введи числовое значение!")
 
 print("Bot is running...")
 bot.infinity_polling(skip_pending=True)
