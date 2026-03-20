@@ -94,8 +94,9 @@ def callback_price(call):
         markup = types.InlineKeyboardMarkup(row_width=2)
 
         button = types.InlineKeyboardButton(text="🧮 Рассчитать стоимость", callback_data=f"calc_{price}_{sym}")
+        button2 = types.InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
 
-        markup.add(button)
+        markup.add(button, button2)
 
         text = f"📈 Курс {coin_id.capitalize()}: {price} {sym}"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
