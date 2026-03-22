@@ -5,9 +5,10 @@ from telebot import types
 from config import EXCHANGE_KEY 
 from config import TOKEN
 from datetime import datetime
+import sqlite3
 
 bot = telebot.TeleBot(TOKEN)
-CURRENCIES = {"🪙 BTC": "bitcoin", "🔹 ETH": "ethereum", "USDT": "tether", "SOL": "solana", "BNB": "binancecoin", "XRP": "ripple", "USDC": "usd-coin", "ADA": "cardano", "DOGE": "dogecoin", "TRX": "tron"}
+CURRENCIES = {"🪙 BTC": "bitcoin", "🔹 ETH": "ethereum", "💵 USDT": "tether"}
 CATEGORIES = ["🍕 Еда", "🚌 Транспорт", "🎮 Развлечения"]
 
 def main_menu_markup():
